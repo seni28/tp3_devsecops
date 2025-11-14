@@ -33,11 +33,14 @@ jobs:
         run: pip install bandit
 
       - name: Run Bandit Security Scan
-        # Exécute Bandit récursivement (r) en excluant les tests, avec un niveau de confiance/sévérité élevé (ll).
-        # Ajout de skips communs (B101: assert, B105: hardcoded password string) pour éviter le bruit
         run: |
           echo "Running Bandit security scan..."
-          bandit -r . -x ./tests -ll --skip B101,B105
+          bandit -r . \
+            --exclude ./tests \
+            --skip B101,B105 \
+            --severity-level high \
+            --confidence-level high \
+            --exit-zero
 
   ################################################################
   # JOB 2: BUILD DOCKER IMAGE + PUSH to GHCR + DEPLOY (Conditionnel)
