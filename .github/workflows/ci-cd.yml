@@ -16,7 +16,7 @@ env:
 
 jobs:
   ################################################################
-  # JOB 1: SECURITY SCAN avec BANDIT (Static Analysis Security Testing)
+  # JOB 1: SECURITY SCAN avec BANDIT
   ################################################################
   security_scan:
     runs-on: ubuntu-latest
@@ -43,15 +43,15 @@ jobs:
             --exit-zero
 
   ################################################################
-  # JOB 2: BUILD DOCKER IMAGE + PUSH to GHCR + DEPLOY (Conditionnel)
+  # JOB 2: BUILD DOCKER IMAGE + PUSH GHCR + DEPLOY COOLIFY
   ################################################################
   build_and_deploy:
-    # Ce job s'exécute SEULEMENT si 'security_scan' a réussi
     needs: security_scan
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write # Nécessaire pour pousser vers GHCR
+      packages: write
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -61,7 +61,6 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          # Utilise le GITHUB_TOKEN fourni automatiquement par GitHub
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
@@ -86,16 +85,32 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # --- DEPLOIEMENT VIA WEBHOOK COOLIFY (Couvre les options 3a/3b) ---
+      ############################################################
+      # DEPLOIEMENT COOLIFY AVEC AUTHENTIFICATION (Coolify v4)
+      ############################################################
       - name: Trigger Coolify Deployment Webhook
-        if: github.ref == 'refs/heads/main' # Déployer uniquement sur le push vers 'main'
+        if: github.ref == 'refs/heads/main'
         env:
           COOLIFY_WEBHOOK_URL: ${{ secrets.COOLIFY_WEBHOOK_URL }}
+          COOLIFY_API_TOKEN: ${{ secrets.COOLIFY_API_TOKEN }}
         run: |
-          if [ -z "$COOLIFY_WEBHOOK_URL" ]; then
-            echo "::warning::COOLIFY_WEBHOOK_URL secret is not set. Skipping Coolify deployment trigger."
-          else
-            echo "Deployment triggered for app '${{ env.COOLIFY_APP_NAME }}' on Coolify."
-            # Envoi d'une requête POST simple pour déclencher le webhook Coolify
-            curl -X POST --fail -s -o /dev/null -w "%{http_code}" $COOLIFY_WEBHOOK_URL
+          if [ -z "$COOLIFY_WEBHOOK_URL" ] || [ -z "$COOLIFY_API_TOKEN" ]; then
+            echo "::error::COOLIFY_WEBHOOK_URL or COOLIFY_API_TOKEN is missing."
+            exit 1
           fi
+
+          echo "Triggering deployment on Coolify for '${{ env.COOLIFY_APP_NAME }}'..."
+
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer $COOLIFY_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            -X POST "$COOLIFY_WEBHOOK_URL")
+
+          echo "Coolify HTTP response: $RESPONSE"
+
+          if [ "$RESPONSE" -ne 200 ] && [ "$RESPONSE" -ne 204 ]; then
+            echo "::error::Coolify deployment failed (HTTP $RESPONSE)"
+            exit 22
+          fi
+
+          echo "✅ Coolify deployment triggered successfully!"
